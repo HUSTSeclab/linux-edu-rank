@@ -10,21 +10,17 @@ import git
 import requests
 from tqdm import tqdm
 
-def is_university_domain(test_domain, uni_list):
-    '''
-    Verify if the provided domain is a university domain in the uni_list
-    '''
+
+def find_university(test_domain, uni_list):
     for university in uni_list:
         if test_domain in university["domains"]:
-            return True
-
+            return university
     for university in uni_list:
         for raw_domain in university["domains"]:
-            # domain: sc.edu
-            # raw_domain: osc.edu
-            if test_domain.endswith(raw_domain):
-                return True
-    return False
+            if test_domain.endswith(raw_domain) or raw_domain.endswith(test_domain):
+                return university
+    return None
+
 
 parser = ArgumentParser()
 parser.add_argument("--branch", type=str, default="master")
@@ -38,12 +34,10 @@ repo_name = args.repo
 
 repo = git.Repo(path)
 
-
 print("Getting university list...")
-university_list:list = requests.get(
+university_list: list = requests.get(
     "https://github.com/Hipo/university-domains-list/raw/master/world_universities_and_domains.json"
 ).json()
-
 
 print("Getting commits list...")
 commits = list(repo.iter_commits(branch))
@@ -67,7 +61,7 @@ for commit in tqdm(commits):
         continue
     # get email domain
     domain = email.split("@")[-1]
-    if not is_university_domain(domain, university_list):
+    if not find_university(domain, university_list):
         continue
 
     result_patches[domain] = result_patches.get(domain, 0) + 1
@@ -92,26 +86,13 @@ for commit in tqdm(commits):
         }
     )
 
-
-def get_university(domain):
-    for university in university_list:
-        if domain in university["domains"]:
-            return university
-
-    for university in university_list:
-        for raw_domain in university["domains"]:
-            if domain.endswith(raw_domain) or raw_domain.endswith(domain):
-                return university
-    return None
-
-
 # sort and save result to file
 result = map(
     lambda x: {
         "domain": x[0],
         "count": x[1],
         "lines": result_lines[x[0]],
-        "university": get_university(x[0]),
+        "university": find_university(x[0], university_list),
     },
     result_patches.items(),
 )
@@ -132,6 +113,7 @@ for item in result:
                 result_authors.get(item["domain"], {}).items(),
             )
         )
+
 
     if item["university"] is None:
         authors = result_authors_transform(result_authors)
@@ -168,16 +150,16 @@ result = list(map(lambda x: x[1] | {"id": x[0] + 1}, enumerate(result)))
 
 result = reduce(
     lambda s, i: s
-    + [
-        i
-        | {
-            "rank": (
-                i["id"]
-                if len(s) == 0 or i["count"] != s[-1]["count"]
-                else s[-1]["rank"]
-            )
-        }
-    ],
+                 + [
+                     i
+                     | {
+                         "rank": (
+                             i["id"]
+                             if len(s) == 0 or i["count"] != s[-1]["count"]
+                             else s[-1]["rank"]
+                         )
+                     }
+                 ],
     result,
     [],
 )
@@ -258,7 +240,7 @@ def generate_html(id, title, patches):
                                 .replace("<", "&lt;")
                                 .replace(">", "&gt;")
                             ),
-                            patches[(i - 1) * PAGE_SIZE : i * PAGE_SIZE],
+                            patches[(i - 1) * PAGE_SIZE: i * PAGE_SIZE],
                         )
                     ),
                 )
